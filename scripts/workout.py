@@ -24,6 +24,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 PLAN_FILE = os.path.join(DATA_DIR, "plan.json")
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
+BODY_FILE = os.path.join(DATA_DIR, "body_status.json")
 CURRENT_FILE = os.path.join(DATA_DIR, ".current_workout.json")
 
 # ─── 基础工具 ───────────────────────────────────────────────
@@ -512,6 +513,102 @@ def history_table(days: int = 30):
         return None
     return recent
 
+# ─── 身体状态 ────────────────────────────────────────────────
+
+def body_get():
+    """获取当前身体状态"""
+    return load_json(BODY_FILE, None)
+
+def body_update(height_cm=None, weight_kg=None, body_fat_pct=None,
+                goal=None, notes=None, exercise_freq=None,
+                experience=None, limitations=None):
+    """更新身体状态字段（只更新提供的字段）"""
+    data = load_json(BODY_FILE, {})
+    now = datetime.now().strftime("%Y-%m-%d")
+    if "created_at" not in data:
+        data["created_at"] = now
+    data["updated_at"] = now
+    if height_cm is not None:
+        data["height_cm"] = height_cm
+    if weight_kg is not None:
+        data["weight_kg"] = weight_kg
+    if body_fat_pct is not None:
+        data["body_fat_pct"] = body_fat_pct
+    if goal is not None:
+        data["goal"] = goal
+    if notes is not None:
+        data["notes"] = notes
+    if exercise_freq is not None:
+        data["exercise_freq"] = exercise_freq
+    if experience is not None:
+        data["experience"] = experience
+    if limitations is not None:
+        data["limitations"] = limitations
+    save_json(BODY_FILE, data)
+    return data
+
+def body_log(height_cm=None, weight_kg=None, body_fat_pct=None, notes=None):
+    """记录一条身体状态历史（用于定期追踪变化）"""
+    data = load_json(BODY_FILE, {})
+    history = data.get("history", [])
+    entry = {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "height_cm": height_cm if height_cm is not None else data.get("height_cm"),
+        "weight_kg": weight_kg if weight_kg is not None else data.get("weight_kg"),
+        "body_fat_pct": body_fat_pct if body_fat_pct is not None else data.get("body_fat_pct"),
+        "notes": notes or "",
+    }
+    history = [h for h in history if h.get("date") != entry["date"]]
+    history.insert(0, entry)
+    data["history"] = history
+    save_json(BODY_FILE, data)
+    return entry
+
+def body_history(days=90):
+    """显示身体状态历史"""
+    data = load_json(BODY_FILE, {})
+    history = data.get("history", [])
+    cutoff = (datetime.now() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
+    recent = [h for h in history if h.get("date", "") >= cutoff]
+    if not recent:
+        return None
+    return recent
+
+def body_display():
+    """返回身体状态摘要字符串"""
+    data = load_json(BODY_FILE, None)
+    if not data:
+        return "还没有身体数据，请用「更新身体数据」告诉我你的基本信息～"
+    lines = ["🏋️ **当前身体状态**"]
+    if data.get("height_cm"):
+        lines.append(f"  身高：{data['height_cm']} cm")
+    if data.get("weight_kg"):
+        lines.append(f"  体重：{data['weight_kg']} kg")
+    if data.get("body_fat_pct"):
+        lines.append(f"  体脂：{data['body_fat_pct']} %")
+    if data.get("goal"):
+        lines.append(f"  目标：{data['goal']}")
+    if data.get("exercise_freq"):
+        lines.append(f"  训练频率：{data['exercise_freq']}")
+    if data.get("experience"):
+        lines.append(f"  经验：{data['experience']}")
+    if data.get("limitations"):
+        lines.append(f"  限制：{data['limitations']}")
+    if data.get("notes"):
+        lines.append(f"  备注：{data['notes']}")
+    history = data.get("history", [])
+    if history:
+        latest = history[0]
+        lines.append(f"\n📈 最新记录（{latest.get('date','')}）")
+        if latest.get("weight_kg"):
+            lines.append(f"  体重 {latest['weight_kg']} kg")
+        if latest.get("body_fat_pct"):
+            lines.append(f"  体脂 {latest['body_fat_pct']} %")
+    updated = data.get("updated_at", "")
+    if updated:
+        lines.append(f"\n⏱️ 更新于 {updated}")
+    return "\n".join(lines)
+
 # ─── 主入口 ───────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -584,6 +681,50 @@ if __name__ == "__main__":
         text = sys.argv[2] if len(sys.argv) > 2 else ""
         result = plan_parse(text)
         print(json.dumps(result, ensure_ascii=False))
+
+    elif cmd == "body":
+        # 用法: workout.py body get/update/log/view
+        sub = sys.argv[2] if len(sys.argv) > 2 else "view"
+        if sub == "get":
+            print(json.dumps(body_get() or {}, ensure_ascii=False, indent=2))
+        elif sub == "update":
+            # workout.py body update height_cm=175 weight_kg=70 body_fat_pct=18 goal="增肌"
+            kwargs = {}
+            for arg in sys.argv[3:]:
+                if "=" in arg:
+                    k, v = arg.split("=", 1)
+                    if k in ("height_cm", "weight_kg", "body_fat_pct"):
+                        kwargs[k] = float(v) if "." in v else int(v)
+                    else:
+                        kwargs[k] = v
+            body_update(**kwargs)
+            print(body_display())
+        elif sub == "log":
+            # workout.py body log weight=69.5 body_fat=17.5
+            kwargs = {}
+            for arg in sys.argv[3:]:
+                if "=" in arg:
+                    k, v = arg.split("=", 1)
+                    if k in ("height_cm", "weight_kg", "body_fat_pct"):
+                        kwargs[k] = float(v) if "." in v else int(v)
+                    else:
+                        kwargs[k] = v
+            entry = body_log(**kwargs)
+            print(f"✅ 已记录身体状态（{entry['date']}）：体重 {entry.get('weight_kg','?')} kg，体脂 {entry.get('body_fat_pct','?')} %")
+        elif sub == "history":
+            days = int(sys.argv[3]) if len(sys.argv) > 3 else 90
+            hist = body_history(days)
+            if not hist:
+                print(f"近{days}天没有身体状态记录")
+            else:
+                lines = [f"📊 **身体状态历史（近{days}天）**\n", "| 日期 | 体重(kg) | 体脂(%) |", "|------|---------|--------|"]
+                for h in hist:
+                    lines.append(f"| {h.get('date','?')} | {h.get('weight_kg','—')} | {h.get('body_fat_pct','—')} |")
+                print("\n".join(lines))
+        elif sub == "view":
+            print(body_display())
+        else:
+            print(f"未知子命令: {sub}，可用: get / update / log / view / history")
 
     else:
         print(f"未知命令: {cmd}")
