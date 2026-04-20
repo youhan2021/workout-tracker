@@ -1,107 +1,160 @@
-# workout-tracker
+# fitness-coach
 
-A simple CLI-based workout planner and tracker for Hermès Agent.
+A Telegram-native personal workout tracker — low-friction input, status tracking, dynamic training suggestions, and daily/weekly/monthly reports.
 
 ---
 
 ## 功能 | Features
 
-- 📋 运动计划管理（按周几分组，每组独立重量）
-- 🏋️ 交互式训练记录（逐一动作记录完成次数）
-- 📊 训练历史查看
-- 🔄 跳过/重置/补录支持
+- 🏋️ **训练记录** — 自然语言或结构化输入，无需轮询确认
+- 😫 **状态追踪** — 累/出差/经期/恢复模式等上下文记录
+- 📋 **动态训练建议** — 根据状态自动调整方案
+- 📊 **报告生成** — 日报 / 周报 / 月报 / 阶段总结
+- ⚖️ **身体数据** — 体重/体脂追踪（独立于训练记录）
 
 ---
 
-## 文件结构 | File Structure
+## 目录结构 | File Structure
 
 ```
-workout-tracker/
+fitness-coach/
 ├── SKILL.md              # Skill definition for Hermès
 ├── README.md             # This file
 ├── scripts/
 │   └── workout.py        # Core CLI script
 └── data/
-    ├── plan.example.json # 示例计划（示例文件）
-    ├── plan.json         # 实际计划（已忽略）
-    └── history.json      # 历史记录（已忽略）
+    ├── plan.example.json # 示例计划
+    ├── plan.json         # 当前训练计划
+    ├── history.json       # 统一历史（训练+状态+快照）
+    ├── body_status.json   # 身体状态（已忽略）
+    └── .current_workout.json  # 训练中途进度（临时）
 ```
 
 ---
 
-## 使用方法 | Usage
-
-所有操作通过 Hermès 自然语言指令完成，无需手动运行脚本。
-
-### 计划管理 | Plan Management
+## 使用方法（prompt 指令）| Usage
 
 ```prompt
-# 从文字描述生成计划（AI 自动转 JSON 保存）
-运动计划 每天早上跑步30分钟，周三做俯卧撑和卷腹各3组
+# 训练记录
+今天跑了40分钟
+深蹲60kg 5x5，卧推30kg 5x5
+晚上练了腿
+走了8000步
+今天拉伸了15分钟
 
-# 查看当前计划
+# 状态记录
+今天很累
+昨晚没睡好
+出差几天
+经期中
+恢复模式
+膝盖有点不舒服
+这周只能练两次
+
+# 查询和报告
+今天练了什么
+这周练了几次
+给我日报
+给我周报
+给我月报
+给我阶段总结
+
+# 计划管理
+更新训练计划 <JSON或文字>
 运动计划查看
+记录方案变更 <原因>
 
-# 从本地 JSON 文件导入计划
-运动计划导入 /path/to/plan.json
+# 身体数据
+更新身体数据 体重=70 体脂=18
+记录身体数据 体重=69.5
+查看身体数据
+身体数据历史
 ```
 
-### 训练 | Training
+---
 
-```prompt
-# 开始今日训练（交互式，逐一动作记录）
-开始运动
+## Quick Actions（适合 Telegram Inline Keyboard）
 
-# 跳过当前动作，进入下一个
-跳过此动作
 ```
-
-### 历史 | History
-
-```prompt
-# 查看近30天训练历史
-运动历史
-
-# 查看近 N 天历史
-运动历史 90
-```
-
-### 数据管理 | Data Management
-
-```prompt
-# 重置今日训练记录（重新开始）
-重置今日
-
-# 重置指定日期的训练记录
-重置日期 2026-04-18
-
-# 手动添加历史记录（补录）
-添加记录 2026-04-18 俯卧撑 10+10+10, 卷腹 15×3
+[🏋️ 练什么] [📝 记录训练] [📊 查看报告]
+[😫 状态记录] [⚖️ 体重记录] [📋 训练计划]
 ```
 
 ---
 
 ## 数据格式 | Data Format
 
-`plan.json` 示例（新版每组级格式）:
+### history.json（新版统一格式）
 
 ```json
 {
-  "name": "我的训练计划",
-  "mode": "weekly",
-  "schedule": {
-    "monday": [
-      {
-        "name": "坐姿划船",
-        "sets": [
-          {"weight_kg": 25, "reps": 8},
-          {"weight_kg": 25, "reps": 8},
-          {"weight_kg": 25, "reps": 8, "dropset": true}
-        ]
+  "records": [
+    {
+      "date": "2026-04-20",
+      "type": "workout",
+      "workout": {
+        "summary": "练了背",
+        "exercises": [
+          {"name": "坐姿划船", "weight_kg": 25, "sets": [{"reps": 8}, {"reps": 8}]}
+        ],
+        "duration_min": 40,
+        "note": ""
       }
-    ]
-  }
+    },
+    {
+      "date": "2026-04-20",
+      "type": "status",
+      "status": "tired",
+      "detail": "昨晚没睡好"
+    }
+  ],
+  "plan_versions": [
+    {"date": "2026-04-20", "reason": "出差降频"}
+  ],
+  "snapshots": []
 }
+```
+
+---
+
+## 状态类型 | Status Types
+
+| 用户词 | 存储值 |
+|--------|--------|
+| 累、很累 | `tired` |
+| 没睡好、睡眠差 | `poor_sleep` |
+| 出差 | `travel` |
+| 经期、生理期 | `period` |
+| 不想练X、讨厌练X | `avoiding:{部位}` |
+| 这周只能练X次 | `frequency_limit:{N}` |
+| 恢复、休息一下 | `recovery` |
+| 膝盖不舒服、肩膀疼 | `injury:{部位}` |
+| 状态不错 | `good` |
+| 正常 | `normal` |
+
+---
+
+## 报告模板 | Report Templates
+
+### 日报
+```
+📅 2026-04-20 日报
+━━━━━━━━━━━━━━━
+🏋️ 训练：坐姿划船 25kg×3组 / 高位下拉 25kg×3组
+⏱️ 约 35 分钟
+😫 状态：累（昨晚没睡好）
+━━━━━━━━━━━━━━━
+```
+
+### 周报
+```
+📅 周报（4/14 - 4/20）
+━━━━━━━━━━━━━━━
+🏋️ 训练次数：4次
+😫 状态：累×2 / 正常×3 / 出差×1
+📉 执行率：4/5 计划日（80%）
+⚠️ 问题：周二因出差未训练
+━━━━━━━━━━━━━━━
 ```
 
 ---
@@ -113,11 +166,17 @@ workout-tracker/
 | `运动计划 <文字>` | 文字 → 自动生成 JSON 计划 |
 | `运动计划 <json>` | 直接导入 JSON |
 | `运动计划查看` | 查看当前计划 |
-| `开始运动` | 开始今日训练 |
+| `开始运动` | 开始今日训练（交互式） |
 | `跳过此动作` | 跳过当前动作 |
-| `运动历史 [天数]` | 查看历史记录 |
-| `添加记录 <日期> <动作>` | 补录历史 |
-| `重置今日` | 清除今天记录 |
+| `运动历史 [天数]` | 输出一张表格显示训练记录 |
+| `添加记录 <日期> <动作>` | 手动添加训练记录 |
+| `重置今日` | 清除今天训练记录 |
+| `更新身体数据 <字段>` | 更新身高/体重/体脂等基本信息 |
+| `记录身体数据 [体重] [体脂]` | 记录当天体重体脂到历史 |
+| `查看身体数据` | 查看当前身体状态 |
+| `身体数据历史 [天数]` | 查看体重体脂变化历史 |
+| `记录状态 <状态>` | 记录今天的身体/训练状态 |
+| `日报` / `周报` / `月报` / `阶段总结` | 输出对应报告 |
 
 ---
 

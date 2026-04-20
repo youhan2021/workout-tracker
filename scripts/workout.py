@@ -393,45 +393,52 @@ def get_duration(start: str, end: str):
         return "—"
 
 def reset_today():
-    """重置今日训练"""
+    """重置今日训练（兼容新旧history格式）"""
     if os.path.exists(CURRENT_FILE):
         os.remove(CURRENT_FILE)
-    history = load_json(HISTORY_FILE, [])
     today = str(date.today())
-    history = [h for h in history if h.get("date") != today]
-    save_json(HISTORY_FILE, history)
+    hist_data = load_json(HISTORY_FILE, {})
+    if isinstance(hist_data, dict) and "records" in hist_data:
+        hist_data["records"] = [r for r in hist_data["records"] if r.get("date") != today]
+        save_json(HISTORY_FILE, hist_data)
+    elif isinstance(hist_data, list):
+        hist_data = [h for h in hist_data if h.get("date") != today]
+        save_json(HISTORY_FILE, hist_data)
     return "今日记录已清除"
 
 def reset_date(target_date: str):
-    """重置指定日期的训练记录"""
-    # 验证日期格式
+    """重置指定日期的训练记录（兼容新旧history格式）"""
     try:
         datetime.strptime(target_date, "%Y-%m-%d")
     except ValueError:
         return f"日期格式错误，请使用 YYYY-MM-DD，如 2026-04-20"
-    history = load_json(HISTORY_FILE, [])
-    before = len(history)
-    history = [h for h in history if h.get("date") != target_date]
-    removed = before - len(history)
-    save_json(HISTORY_FILE, history)
+    hist_data = load_json(HISTORY_FILE, {})
+    removed = 0
+    if isinstance(hist_data, dict) and "records" in hist_data:
+        before = len(hist_data["records"])
+        hist_data["records"] = [r for r in hist_data["records"] if r.get("date") != target_date]
+        removed = before - len(hist_data["records"])
+        save_json(HISTORY_FILE, hist_data)
+    elif isinstance(hist_data, list):
+        before = len(hist_data)
+        hist_data = [h for h in hist_data if h.get("date") != target_date]
+        removed = before - len(hist_data)
+        save_json(HISTORY_FILE, hist_data)
     if removed == 0:
         return f"{target_date} 没有训练记录"
     return f"{target_date} 的记录已清除（{removed}条）"
 
 def add_record(date_str: str, completed_list: list, skipped_list: list = None):
-    """手动添加某日期的训练记录（新每组级格式）
-    completed_list: [{"name": "俯卧撑", "weight_kg": null, "sets": [{"reps": 15}, {"reps": 12}, {"reps": 10}]}]
-    或旧格式兼容: [{"name": "俯卧撑", "sets": [15, 15, 15]}]
+    """手动添加某日期的训练记录（兼容新旧格式）
+    completed_list: [{"name": "俯卧撑", "weight_kg": null, "sets": [{"reps": 15}, {"reps": 12}]}]
     skipped_list: ["动作名", ...]
     """
     try:
         datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError:
         return f"日期格式错误，请使用 YYYY-MM-DD"
-    history = load_json(HISTORY_FILE, [])
-    history = [h for h in history if h.get("date") != date_str]
-    # 兼容旧格式：自动转换为新格式
-    normalized = []
+    # 构建 workout_data（新格式）
+    exercises = []
     for item in completed_list:
         name = item.get("name", "?")
         weight = item.get("weight_kg")
@@ -439,79 +446,280 @@ def add_record(date_str: str, completed_list: list, skipped_list: list = None):
         new_sets = []
         for s in sets_raw:
             if isinstance(s, int):
-                new_sets.append({"reps": s, "weight_kg": weight})
+                new_sets.append({"reps": s})
             elif isinstance(s, dict):
-                new_sets.append({"reps": s.get("reps", 0), "weight_kg": s.get("weight_kg", weight)})
-        normalized.append({"name": name, "weight_kg": weight, "sets": new_sets})
-    # skipped 转成每组skipped标记
-    skipped_names = set(skipped_list or [])
-    # 构建 completed 展开格式
-    completed_flat = []
-    for item in normalized:
-        for s in item["sets"]:
-            completed_flat.append({
-                "name": item["name"],
-                "weight_kg": s.get("weight_kg"),
-                "reps": s.get("reps"),
-                "hold_secs": s.get("hold_secs"),
-                "actual_reps": s.get("reps") if s.get("reps") else 0,
-                "skipped": item["name"] in skipped_names
-            })
-    record = {
-        "date": date_str,
-        "started_at": f"{date_str}T00:00:00",
-        "finished_at": f"{date_str}T00:00:00",
-        "completed": completed_flat
-    }
-    history.insert(0, record)
-    save_json(HISTORY_FILE, history)
-    action_names = ", ".join(item["name"] for item in normalized)
-    return f"{date_str} 记录已保存：{action_names}"
-
+                new_sets.append({"reps": s.get("reps", 0), "actual_reps": s.get("reps")})
+            else:
+                new_sets.append({"reps": s})
+        exercises.append({"name": name, "weight_kg": weight, "sets": new_sets})
+    workout_data = {"exercises": exercises, "summary": "", "note": ""}
+    _history_add(date_str, "workout", workout_data=workout_data)
+    return f"{date_str} 记录已保存：{', '.join(item['name'] for item in completed_list)}"
 # ─── 历史记录 ───────────────────────────────────────────────
 
 def show_history(days: int = 30):
-    """显示训练历史表格"""
-    history = load_json(HISTORY_FILE, [])
+    """显示训练历史表格（兼容新旧格式）"""
+    hist_data = load_json(HISTORY_FILE, [])
+    if isinstance(hist_data, dict):
+        records = hist_data.get("records", [])
+    else:
+        records = hist_data  # 旧格式是数组
     cutoff_date = (datetime.now() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
-    recent = [h for h in history if h.get("date", "") >= cutoff_date]
-    if not recent:
+    # 过滤 workout 类型
+    workouts = [r for r in records if r.get("date", "") >= cutoff_date and r.get("type") == "workout"]
+    if not workouts:
         return f"近{days}天没有训练记录"
     lines = [f"📊 **训练历史（近{days}天）**\n"]
-    lines.append("| 日期 | 完成动作 | 跳过 |")
-    lines.append("|------|---------|------|")
-    for h in recent:
+    lines.append("| 日期 | 完成动作 |")
+    lines.append("|------|---------|")
+    for h in workouts:
         d = h.get("date", "—")
-        completed = h.get("completed", [])
-        by_action = {}
-        for c in completed:
-            name = c.get("name","?")
-            if name not in by_action:
-                by_action[name] = {"done": 0, "skip": 0, "weight": c.get("weight_kg")}
-            if c.get("skipped"):
-                by_action[name]["skip"] += 1
-            else:
-                by_action[name]["done"] += 1
-        parts = []
-        for name, info in by_action.items():
-            w = info["weight"]
-            w_str = f"{w}kg" if w else "自重"
-            if info["skip"]:
-                parts.append(f"{name}({w_str})✅{info['done']} ⏭️{info['skip']}")
-            else:
-                parts.append(f"{name}({w_str})✅{info['done']}")
-        action_str = "; ".join(parts) if parts else "无"
-        lines.append(f"| {d} | {action_str} | |")
+        wd = h.get("workout", {})
+        exercises = wd.get("exercises", [])
+        if exercises:
+            parts = []
+            for e in exercises:
+                w_str = f"{e.get('weight_kg','')}kg" if e.get("weight_kg") else "自重"
+                parts.append(f"{e['name']}({w_str})✅{len(e.get('sets',[]))}")
+            action_str = "; ".join(parts)
+        else:
+            action_str = wd.get("summary", "—")
+        lines.append(f"| {d} | {action_str} |")
     return "\n".join(lines)
 
 def history_table(days: int = 30):
     """返回结构化历史数据供agent渲染"""
-    history = load_json(HISTORY_FILE, [])
+    hist_data = load_json(HISTORY_FILE, [])
+    if isinstance(hist_data, dict):
+        records = hist_data.get("records", [])
+    else:
+        records = hist_data
     cutoff_date = (datetime.now() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
-    recent = [h for h in history if h.get("date", "") >= cutoff_date]
+    recent = [h for h in records if h.get("date", "") >= cutoff_date]
     if not recent:
         return None
     return recent
+
+def _history_add(date_str: str, record_type: str, workout_data=None, status=None, detail=None, reason=None):
+    """向history.json追加记录（新版统一格式，自动迁移旧数据）"""
+    raw = load_json(HISTORY_FILE, None)
+    now = datetime.now().isoformat()
+
+    # 首次写入：如果是 None（旧文件不存在）或 list（旧格式），迁移为新格式
+    if raw is None:
+        hist_data = {"records": [], "plan_versions": [], "snapshots": []}
+    elif isinstance(raw, list):
+        # 旧格式是数组，每项是 workout 记录，转为新 records
+        hist_data = {
+            "records": [{"date": r.get("date"), "type": "workout", "logged_at": r.get("started_at", now), "workout": _normalize_workout_legacy(r)} for r in raw],
+            "plan_versions": [],
+            "snapshots": []
+        }
+    elif isinstance(raw, dict):
+        hist_data = raw
+        if "records" not in hist_data:
+            hist_data["records"] = []
+        if "plan_versions" not in hist_data:
+            hist_data["plan_versions"] = []
+        if "snapshots" not in hist_data:
+            hist_data["snapshots"] = []
+    else:
+        hist_data = {"records": [], "plan_versions": [], "snapshots": []}
+
+    if record_type == "workout":
+        record = {
+            "date": date_str,
+            "type": "workout",
+            "logged_at": now,
+            "workout": workout_data or {}
+        }
+        # 兼容旧格式：如果传入的是旧格式的 completed 列表
+        if isinstance(workout_data, dict) and "completed" in workout_data:
+            record["workout"] = _normalize_workout_legacy(workout_data)
+        hist_data["records"] = [r for r in hist_data["records"] if not (r.get("date") == date_str and r.get("type") == "workout")]
+        hist_data["records"].insert(0, record)
+    elif record_type == "status":
+        record = {
+            "date": date_str,
+            "type": "status",
+            "logged_at": now,
+            "status": status or "normal",
+            "detail": detail or ""
+        }
+        hist_data["records"] = [r for r in hist_data["records"] if not (r.get("date") == date_str and r.get("type") == "status")]
+        hist_data["records"].insert(0, record)
+    elif record_type == "plan_change":
+        version_entry = {
+            "date": date_str,
+            "type": "plan_change",
+            "logged_at": now,
+            "reason": reason or ""
+        }
+        hist_data["plan_versions"].insert(0, version_entry)
+    elif record_type == "snapshot":
+        hist_data["snapshots"].insert(0, record)
+
+    save_json(HISTORY_FILE, hist_data)
+
+def _normalize_workout_legacy(data: dict) -> dict:
+    """将旧格式 workout 数据转换为新格式"""
+    completed = data.get("completed", [])
+    exercises = {}
+    for c in completed:
+        name = c.get("name", "?")
+        if name not in exercises:
+            exercises[name] = {"name": name, "weight_kg": c.get("weight_kg"), "sets": []}
+        exercises[name]["sets"].append({"reps": c.get("reps"), "actual_reps": c.get("actual_reps")})
+    return {
+        "summary": "",
+        "exercises": list(exercises.values()),
+        "duration_min": data.get("duration_min"),
+        "note": data.get("note", "")
+    }
+
+# ─── 报告生成 ───────────────────────────────────────────────
+
+def _get_week_range(ref_date_str: str):
+    """返回给定日期所在周的起止日期（周一~周日）"""
+    d = datetime.strptime(ref_date_str, "%Y-%m-%d")
+    monday = d - __import__('datetime').timedelta(days=d.weekday())
+    sunday = monday + __import__('datetime').timedelta(days=6)
+    return monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
+
+def _get_month_range(ref_date_str: str):
+    """返回给定日期所在月的起止日期"""
+    d = datetime.strptime(ref_date_str, "%Y-%m-%d")
+    first = d.replace(day=1)
+    if d.month == 12:
+        last = d.replace(year=d.year+1, month=1, day=1) - __import__('datetime').timedelta(days=1)
+    else:
+        last = d.replace(month=d.month+1, day=1) - __import__('datetime').timedelta(days=1)
+    return first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d")
+
+def _filter_records(hist_data, start_date: str, end_date: str, rec_type=None):
+    records = hist_data.get("records", []) if isinstance(hist_data, dict) else hist_data
+    result = [r for r in records if start_date <= r.get("date", "") <= end_date]
+    if rec_type:
+        result = [r for r in result if r.get("type") == rec_type]
+    return result
+
+def report_today(ref_date: str = None):
+    ref = ref_date or str(date.today())
+    hist_data = load_json(HISTORY_FILE, {"records": []})
+    workouts = _filter_records(hist_data, ref, ref, "workout")
+    statuses = _filter_records(hist_data, ref, ref, "status")
+    lines = [f"📅 **{ref} 日报**", "━━━━━━━━━━━━━━━"]
+    if workouts:
+        for w in workouts:
+            wd = w.get("workout", {})
+            summary = wd.get("summary", "")
+            exercises = wd.get("exercises", [])
+            dur = wd.get("duration_min")
+            ex_lines = []
+            for e in exercises:
+                sets_str = "×".join(str(s.get("reps", s.get("actual_reps", "?"))) for s in e.get("sets", []))
+                w_str = f"{e.get('weight_kg','')}kg" if e.get("weight_kg") else "自重"
+                ex_lines.append(f"{e['name']} {w_str}×{len(e.get('sets',[]))}组")
+            if summary:
+                lines.append(f"🏋️ 训练：{'；'.join(ex_lines) if ex_lines else summary}")
+            else:
+                lines.append(f"🏋️ 训练：{'；'.join(ex_lines)}")
+            if dur:
+                lines.append(f"⏱️ 约 {dur} 分钟")
+    else:
+        lines.append("🏋️ 训练：无记录")
+    if statuses:
+        for s in statuses:
+            st = s.get("status", "normal")
+            det = s.get("detail", "")
+            lines.append(f"😫 状态：{st}{'（' + det + ')' if det else ''}")
+    else:
+        lines.append("😫 状态：无记录")
+    note = (workouts[0].get("workout", {}).get("note") if workouts else "") or ""
+    lines.append(f"📝 备注：{note or '—'}")
+    lines.append("━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
+
+def report_week(ref_date: str = None):
+    ref = ref_date or str(date.today())
+    mon, sun = _get_week_range(ref)
+    hist_data = load_json(HISTORY_FILE, {"records": []})
+    workouts = _filter_records(hist_data, mon, sun, "workout")
+    statuses = _filter_records(hist_data, mon, sun, "status")
+    lines = [f"📅 **周报（{mon} - {sun}）**", "━━━━━━━━━━━━━━━"]
+    lines.append(f"🏋️ 训练次数：{len(workouts)}次")
+    # 状态统计
+    status_counts = {}
+    for s in statuses:
+        st = s.get("status", "normal")
+        status_counts[st] = status_counts.get(st, 0) + 1
+    if status_counts:
+        status_str = " / ".join(f"{k}×{v}" for k, v in status_counts.items())
+        lines.append(f"😫 状态：{status_str}")
+    # 执行率
+    plan = load_json(PLAN_FILE, {})
+    if plan.get("mode") == "weekly":
+        scheduled = len([d for d in plan.get("schedule", {}).values() if d])
+        exe_rate = f"{len(workouts)}/{scheduled}" if scheduled else "?"
+    else:
+        exe_rate = f"{len(workouts)}次"
+    lines.append(f"📉 执行率：{exe_rate}")
+    # 问题
+    if statuses:
+        problems = [s.get("detail", "") for s in statuses if s.get("status") in ("tired", "poor_sleep", "travel", "injury") and s.get("detail")]
+        if problems:
+            lines.append(f"⚠️ 问题：{problems[0]}")
+    # 方案变更
+    pv = hist_data.get("plan_versions", []) if isinstance(hist_data, dict) else []
+    recent_pv = [v for v in pv if v.get("date", "") >= mon]
+    if recent_pv:
+        lines.append(f"📋 方案变更：v{len(hist_data.get('plan_versions',[]))}（{recent_pv[0].get('reason','')[:20]}）")
+    lines.append("━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
+
+def report_month(ref_date: str = None):
+    ref = ref_date or str(date.today())
+    first, last = _get_month_range(ref)
+    hist_data = load_json(HISTORY_FILE, {"records": []})
+    workouts = _filter_records(hist_data, first, last, "workout")
+    statuses = _filter_records(hist_data, first, last, "status")
+    total_dur = sum(w.get("workout", {}).get("duration_min", 0) for w in workouts)
+    lines = [f"📅 **月报（{first[:7]}）**", "━━━━━━━━━━━━━━━"]
+    lines.append(f"🏋️ 训练次数：{len(workouts)}次")
+    if total_dur:
+        lines.append(f"⏱️ 总时长：约 {total_dur} 分钟（{total_dur//60} 小时）")
+    # 状态趋势
+    status_counts = {}
+    for s in statuses:
+        st = s.get("status", "normal")
+        status_counts[st] = status_counts.get(st, 0) + 1
+    if status_counts:
+        status_str = " / ".join(f"{k}×{v}" for k, v in sorted(status_counts.items()))
+        lines.append(f"😫 状态：{status_str}")
+    lines.append("━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
+
+def report_summary(ref_date: str = None):
+    ref = ref_date or str(date.today())
+    hist_data = load_json(HISTORY_FILE, {"records": []})
+    today_dt = datetime.strptime(ref, "%Y-%m-%d")
+    # 最近4周
+    four_weeks_ago = (today_dt - __import__('datetime').timedelta(weeks=4)).strftime("%Y-%m-%d")
+    workouts_4w = _filter_records(hist_data, four_weeks_ago, ref, "workout")
+    pv = hist_data.get("plan_versions", []) if isinstance(hist_data, dict) else []
+    lines = [f"📅 **阶段总结（近4周）**", "━━━━━━━━━━━━━━━"]
+    lines.append(f"🏋️ 训练次数：{len(workouts_4w)}次")
+    # 方案变更次数
+    recent_pv = [v for v in pv if v.get("date", "") >= four_weeks_ago]
+    if recent_pv:
+        lines.append(f"📋 方案变更：{len(recent_pv)}次")
+        lines.append(f"  最近：{recent_pv[0].get('reason', '')}")
+    # 总训练时长
+    total_dur = sum(w.get("workout", {}).get("duration_min", 0) for w in workouts_4w)
+    if total_dur:
+        lines.append(f"⏱️ 总时长：约 {total_dur//60} 小时")
+    lines.append("━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
 
 # ─── 身体状态 ────────────────────────────────────────────────
 
@@ -726,6 +934,53 @@ if __name__ == "__main__":
         else:
             print(f"未知子命令: {sub}，可用: get / update / log / view / history")
 
+    elif cmd == "log":
+        # workout.py log "2026-04-20" '{"summary":"练了背","exercises":[...],"duration_min":35}'
+        date_str = sys.argv[2] if len(sys.argv) > 2 else str(date.today())
+        try:
+            data = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
+        except:
+            print("JSON格式错误")
+            sys.exit(1)
+        _history_add(date_str, "workout", workout_data=data)
+        print(f"✅ 已记录训练：{data.get('summary', '训练记录')}（{date_str}）")
+
+    elif cmd == "status-log":
+        # workout.py status-log "2026-04-20" tired "昨晚没睡好"
+        date_str = sys.argv[2] if len(sys.argv) > 2 else str(date.today())
+        status = sys.argv[3] if len(sys.argv) > 3 else "normal"
+        detail = sys.argv[4] if len(sys.argv) > 4 else ""
+        _history_add(date_str, "status", status=status, detail=detail)
+        print(f"✅ 已记录状态：{status}（{date_str}）{'— ' + detail if detail else ''}")
+
+    elif cmd == "report":
+        sub = sys.argv[2] if len(sys.argv) > 2 else "today"
+        ref_date = sys.argv[3] if len(sys.argv) > 3 else str(date.today())
+        if sub == "today":
+            print(report_today(ref_date))
+        elif sub == "week":
+            print(report_week(ref_date))
+        elif sub == "month":
+            print(report_month(ref_date))
+        elif sub == "summary":
+            print(report_summary(ref_date))
+        else:
+            print("可用: today / week / month / summary")
+
+    elif cmd == "plan":
+        sub = sys.argv[2] if len(sys.argv) > 2 else ""
+        if sub == "version":
+            reason = sys.argv[3] if len(sys.argv) > 3 else ""
+            _history_add(str(date.today()), "plan_change", reason=reason)
+            print(f"✅ 方案版本记录已保存：{reason}")
+        elif sub == "view":
+            print(plan_view())
+        elif sub == "set":
+            print(plan_set(sys.argv[3] if len(sys.argv) > 3 else sys.stdin.read()))
+        elif sub == "import":
+            print(plan_import(sys.argv[3] if len(sys.argv) > 3 else ""))
+        else:
+            print("可用: version / view / set / import")
     else:
         print(f"未知命令: {cmd}")
         print(__doc__)
