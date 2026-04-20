@@ -18,7 +18,7 @@ A Telegram-native personal workout tracker — low-friction input, status tracki
 
 ```
 fitness-coach/
-├── SKILL.md              # Skill definition for Hermès
+├── SKILL.md              # Skill definition for OpenClaw
 ├── README.md             # This file
 ├── scripts/
 │   └── workout.py        # Core CLI script
@@ -159,7 +159,7 @@ fitness-coach/
 
 ---
 
-## 在 Hermès 中使用 | Using in Hermès
+## 在 OpenClaw 中使用 | Using in OpenClaw
 
 | 命令 | 说明 |
 |------|------|
