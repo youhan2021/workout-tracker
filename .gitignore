@@ -2,3 +2,4 @@
 data/plan.json
 data/history.json
 data/.current_workout.json
+scripts/__pycache__/
