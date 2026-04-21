@@ -92,7 +92,15 @@ def plan_view():
         for i, day_plan in enumerate(plan.get("sequence", [])):
             lines.append(f"  第{i+1}天: {', '.join(a['name'] for a in day_plan)}")
     else:
-        for day, day_data in plan.get("schedule", {}).items():
+        today_day = get_today_name().capitalize()
+        day_order = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
+        schedule = plan.get("schedule", {})
+        # 按固定顺序输出
+        for day in day_order:
+            if day not in schedule:
+                continue
+            day_data = schedule[day]
+            marker = "👉 " if day == today_day.lower() else "   "
             if isinstance(day_data, dict):
                 # 双版本格式
                 goal = day_data.get("goal", "")
@@ -102,17 +110,17 @@ def plan_view():
                         items = day_data[key]
                         if isinstance(items, list) and items:
                             versions.append(f"{key}: {', '.join(a['name'] for a in items)}")
-                lines.append(f"  {day.capitalize()} 🎯{goal}")
+                lines.append(f"{marker}{day.capitalize()} 🎯{goal}")
                 for v in versions:
                     lines.append(f"    {v}")
             elif isinstance(day_data, list):
                 # 普通格式
                 if day_data:
-                    lines.append(f"  {day.capitalize()}: {', '.join(a['name'] for a in day_data)}")
+                    lines.append(f"{marker}{day.capitalize()}: {', '.join(a['name'] for a in day_data)}")
                 else:
-                    lines.append(f"  {day.capitalize()}: 休息")
+                    lines.append(f"{marker}{day.capitalize()}: 休息")
             else:
-                lines.append(f"  {day.capitalize()}: {day_data}")
+                lines.append(f"{marker}{day.capitalize()}: {day_data}")
     return "\n".join(lines)
 
 # ─── 获取今日训练 ───────────────────────────────────────────
@@ -683,7 +691,7 @@ def report_month(ref_date: str = None):
     hist_data = load_json(HISTORY_FILE, {"records": []})
     workouts = _filter_records(hist_data, first, last, "workout")
     statuses = _filter_records(hist_data, first, last, "status")
-    total_dur = sum(w.get("workout", {}).get("duration_min", 0) for w in workouts)
+    total_dur = sum((w.get("workout") or {}).get("duration_min") or 0 for w in workouts)
     lines = [f"📅 **月报（{first[:7]}）**", "━━━━━━━━━━━━━━━"]
     lines.append(f"🏋️ 训练次数：{len(workouts)}次")
     if total_dur:
@@ -715,7 +723,7 @@ def report_summary(ref_date: str = None):
         lines.append(f"📋 方案变更：{len(recent_pv)}次")
         lines.append(f"  最近：{recent_pv[0].get('reason', '')}")
     # 总训练时长
-    total_dur = sum(w.get("workout", {}).get("duration_min", 0) for w in workouts_4w)
+    total_dur = sum((w.get("workout") or {}).get("duration_min") or 0 for w in workouts_4w)
     if total_dur:
         lines.append(f"⏱️ 总时长：约 {total_dur//60} 小时")
     lines.append("━━━━━━━━━━━━━━━")
@@ -935,15 +943,45 @@ if __name__ == "__main__":
             print(f"未知子命令: {sub}，可用: get / update / log / view / history")
 
     elif cmd == "log":
-        # workout.py log "2026-04-20" '{"summary":"练了背","exercises":[...],"duration_min":35}'
+        # workout.py log "2026-04-20" '{"summary":"练了背","exercises":[...],"duration_min":null}'
+        session_file = os.path.join(DATA_DIR, ".session.json")
+        has_session = os.path.exists(session_file)
+        session = load_json(session_file) if has_session else None
         date_str = sys.argv[2] if len(sys.argv) > 2 else str(date.today())
         try:
             data = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
         except:
             print("JSON格式错误")
             sys.exit(1)
+
+        # 如果有 session，先检查计划是否已全部完成
+        auto_finished = False
+        if has_session and session:
+            plan = session.get("plan")
+            if plan and isinstance(plan, list) and isinstance(data, dict):
+                logged_names = {e.get("name") for e in data.get("exercises", []) if isinstance(e, dict)}
+                planned_names = {a.get("name") for a in plan if isinstance(a, dict)}
+                if planned_names and planned_names <= logged_names:
+                    # 所有计划动作都已记录，自动算时长
+                    started_at = session.get("started_at")
+                    finished_at = datetime.now().isoformat()
+                    dur_mins = 0
+                    try:
+                        s = datetime.fromisoformat(started_at)
+                        e = datetime.fromisoformat(finished_at)
+                        dur_mins = int((e - s).total_seconds() / 60)
+                    except:
+                        pass
+                    data["duration_min"] = dur_mins
+                    auto_finished = True
+
         _history_add(date_str, "workout", workout_data=data)
-        print(f"✅ 已记录训练：{data.get('summary', '训练记录')}（{date_str}）")
+        if auto_finished:
+            os.remove(session_file)
+            print(f"✅ 已记录训练：{data.get('summary', '训练记录')}（{date_str}）")
+            print(f"🏁 计划动作全部完成，自动结束训练，用时约 {data.get('duration_min')} 分钟")
+        else:
+            print(f"✅ 已记录训练：{data.get('summary', '训练记录')}（{date_str}）")
 
     elif cmd == "status-log":
         # workout.py status-log "2026-04-20" tired "昨晚没睡好"
@@ -981,6 +1019,74 @@ if __name__ == "__main__":
             print(plan_import(sys.argv[3] if len(sys.argv) > 3 else ""))
         else:
             print("可用: version / view / set / import")
+
+    elif cmd == "start-session":
+        # 开启训练计时会话（不依赖 guided start workflow）
+        session_file = os.path.join(DATA_DIR, ".session.json")
+        # 自动读取今日计划写入 session，用于判断是否全部完成
+        plan = load_json(PLAN_FILE)
+        today_plan = None
+        if plan:
+            mode = plan.get("mode", "weekly")
+            if mode == "sequence":
+                day_of_year = date.today().timetuple().tm_yday
+                seq = plan.get("sequence", [])
+                if seq:
+                    today_plan = seq[(day_of_year - 1) % len(seq)]
+            else:
+                day_name = get_today_name()
+                schedule = plan.get("schedule", {})
+                raw = schedule.get(day_name)
+                # 解析出简单动作列表用于完成判断
+                if isinstance(raw, list):
+                    today_plan = raw
+                elif isinstance(raw, dict):
+                    # 双版本，取第一个可用版本
+                    for key in raw:
+                        if key not in ("goal", "duration", "note"):
+                            today_plan = raw[key]
+                            break
+        session = {
+            "started_at": datetime.now().isoformat(),
+            "date": str(date.today()),
+            "plan": today_plan
+        }
+        save_json(session_file, session)
+        print(f"✅ 训练计时开始：{session['started_at']}")
+
+    elif cmd == "finish-workout":
+        # 结束训练：从 session.json 读取开始时间，计算时长，更新 history.json 最新记录
+        session_file = os.path.join(DATA_DIR, ".session.json")
+        if not os.path.exists(session_file):
+            print("没有正在计时的训练会话，请先运行 start-session")
+            sys.exit(1)
+        session = load_json(session_file)
+        started_at = session.get("started_at")
+        finished_at = datetime.now().isoformat()
+        # 计算时长
+        dur_mins = 0
+        try:
+            s = datetime.fromisoformat(started_at)
+            e = datetime.fromisoformat(finished_at)
+            dur_mins = int((e - s).total_seconds() / 60)
+        except:
+            pass
+        # 读取 history.json 最新训练记录，更新其 duration_min
+        hist_data = load_json(HISTORY_FILE, {"records": []})
+        records = hist_data.get("records", [])
+        # 找到 date 相同的最新的 workout 记录
+        date_str = session.get("date", str(date.today()))
+        for i, rec in enumerate(records):
+            if rec.get("date") == date_str and rec.get("type") == "workout":
+                if rec["workout"].get("duration_min") is None or rec["workout"].get("duration_min") == 0:
+                    rec["workout"]["duration_min"] = dur_mins
+                    records[i] = rec
+                    break
+        hist_data["records"] = records
+        save_json(HISTORY_FILE, hist_data)
+        os.remove(session_file)
+        print(f"✅ 训练完成，用时约 {dur_mins} 分钟")
+
     else:
         print(f"未知命令: {cmd}")
         print(__doc__)

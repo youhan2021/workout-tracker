@@ -70,7 +70,7 @@ data/
 当用户发送消息时，按以下顺序判断意图：
 
 ### 1. 训练记录类（最高优先级）
-关键词/模式：`跑了`、`练了`、`深蹲`、`卧推`、`走了多少步`、`拉伸`、`骑车`、`上半身`、`今天训练了`、`做了.*组`、`Xkg.*X次`
+关键词/模式：`跑了`、`练了`、`深蹲`、`卧推`、`走了多少步`、`拉伸`、`骑车`、`上半身`、`今天训练了`、`做了.*组`、`Xkg.*X次`、`开始练`、`练完了`、`第.*组`
 
 **处理流程：**
 1. 提取动作名称、重量、组数、次数、时长
@@ -85,6 +85,12 @@ data/
 - `走了8000步` → `{summary:"步行8000步"}`
 - `今天拉伸了15分钟` → `{summary:"拉伸15分钟"}`
 - `上半身训练` → `{summary:"上半身训练"}`
+
+**实时记录工作流（低摩擦版）：**
+1. 用户说「开始练」→ 调用 `workout.py start-session`（记录开始时间到 `data/.session.json`）
+2. 用户报每组成绩如「第1组 10个」「第二组 8个」→ 调用 `workout.py log "<date>" '<json>'` 实时更新记录（`duration_min` 先写 `null`）
+3. 用户说「练完了」→ 调用 `workout.py finish-workout`（从 `.session.json` 读取开始时间，计算实际时长，更新历史记录中对应记录的 `duration_min`）
+4. **注意**：`log` 每次调用会**覆盖**当天训练记录，所以每组完成后要重新传入**完整**的 exercises 列表
 
 ### 2. 状态记录类
 关键词/模式：`累`、`没睡好`、`不想练.*`、`这周只能.*次`、`出差`、`经期`、`恢复`、`不舒服`、`膝盖.*`、`状态`
@@ -109,16 +115,19 @@ data/
 | 正常 | `normal` |
 
 ### 3. 查询报告类
-关键词/模式：`今天练了什么`、`这周练了几次`、`报告`、`周报`、`月报`、`这周为什么执行.*`、`最近计划改了.*`
+关键词/模式：`今天练了什么`、`这周练了几次`、`报告`、`周报`、`月报`、`这周为什么执行.*`、`最近计划改了.*`、`练什么`
 
 **处理流程：**
-- `今天练了什么` → 查 history.json 中今日 type=workout 记录
-- `这周练了几次` → 统计本周 type=workout 数量
-- `这周状态` → 查本周 type=status 记录
-- `日报` → 调用 `workout.py report today`
-- `周报` → 调用 `workout.py report week`
-- `月报` → 调用 `workout.py report month`
-- `阶段总结` → 调用 `workout.py report summary`
+1. **先判断今天周几**：调用 `workout.py plan view`，内部已根据 `date.today()` 自动确定真实日期对应的星期
+2. **再查今日计划**：`workout.py plan view` 输出中已包含今日训练内容（标注了当天）
+3. **其他查询**：
+   - `今天练了什么` → 查 history.json 中今日 type=workout 记录
+   - `这周练了几次` → 统计本周 type=workout 数量
+   - `这周状态` → 查本周 type=status 记录
+   - `日报` → 调用 `workout.py report today`
+   - `周报` → 调用 `workout.py report week`
+   - `月报` → 调用 `workout.py report month`
+   - `阶段总结` → 调用 `workout.py report summary`
 
 ### 4. 计划管理类
 关键词/模式：`新计划`、`改训练计划`、`更新计划`、`训练计划.*调整`
@@ -173,10 +182,12 @@ data/
 
 | 脚本命令 | 功能 |
 |----------|------|
-| `workout.py log "<date>" '<json>'` | 记录一条训练 |
+| `workout.py start-session` | 开始训练计时（记录开始时间到 .session.json） |
+| `workout.py log "<date>" '<json>'` | 记录/更新一条训练（实时逐组更新） |
+| `workout.py finish-workout` | 结束训练（从 session 自动算时长并更新记录） |
 | `workout.py status-log "<date>" <status> <detail>` | 记录一条状态 |
 | `workout.py plan version <reason>` | 记录方案版本变更 |
-| `workout.py plan view` | 查看当前计划 |
+| `workout.py plan view` | 查看当前计划（自动标注今天） |
 | `workout.py report today` | 日报 |
 | `workout.py report week [date]` | 周报（默认本周） |
 | `workout.py report month [date]` | 月报（默认本月） |
@@ -188,7 +199,6 @@ data/
 | `workout.py history [days]` | 训练历史（仅训练记录） |
 | `workout.py reset-today` | 重置今日 |
 | `workout.py reset-date <date>` | 重置指定日 |
-| `workout.py start` | 开始交互训练（老功能保留） |
 
 ---
 
