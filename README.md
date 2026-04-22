@@ -12,9 +12,18 @@ git clone https://github.com/youhan2021/fitness-coach-lite.git ~/.hermes/skills/
 
 # 从 ClawHub 安装（clawhub.gg）
 # 在 ClawHub 搜索 fitness-coach-lite，使用 listing 提供的安装命令
+```
 
-# 安装后首次使用需要初始化训练计划
-python3 ~/.hermes/skills/fitness/fitness-coach-lite/scripts/workout.py plan import
+**首次使用 — 初始化训练计划：**
+```prompt
+导入训练计划：
+周一：坐姿划船, 高位下拉, Face pull
+周二：飞鸟, Chest press
+周三：悬挂肩胛, 坐姿划船（轻）, 卷腹
+周四：臀桥, Leg press, 腿弯举
+周五：臀桥, 悬挂肩胛, 高位下拉（轻）
+周六：坐姿划船, 高位下拉, Chest press
+周日：臀桥, Leg press, 腿外展, 卷腹
 ```
 
 ---
