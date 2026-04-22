@@ -1,26 +1,11 @@
 ---
-name: fitness-coach
+name: fitness-coach-lite
 description: 个人运动追踪教练skill — 低摩擦Telegram输入，训练记录+状态追踪+动态训练建议+日报周报月报。触发：用户发送任何运动/状态/查询相关消息时加载。
 ---
 
-# fitness-coach
+# fitness-coach-lite
 
 Telegram 低交互场景的个人运动追踪教练。把"像发消息一样记录运动"作为核心目标。
-
----
-
-## 安装 Installation
-
-```bash
-# 从 GitHub 安装
-git clone https://github.com/youhan2021/fitness-coach-lite.git ~/.hermes/skills/fitness/fitness-coach-lite
-
-# 从 ClawHub 安装（clawhub.gg）
-# 在 ClawHub 搜索 fitness-coach-lite 或 run the install command from the listing
-
-# 安装后首次使用需要初始化计划
-python3 ~/.hermes/skills/fitness/fitness-coach-lite/scripts/workout.py plan import
-```
 
 ---
 

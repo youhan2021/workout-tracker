@@ -1,6 +1,21 @@
-# fitness-coach
+# fitness-coach-lite
 
 A Telegram-native personal workout tracker — low-friction input, status tracking, dynamic training suggestions, and daily/weekly/monthly reports.
+
+---
+
+## 安装 | Installation
+
+```bash
+# 从 GitHub 安装
+git clone https://github.com/youhan2021/fitness-coach-lite.git ~/.hermes/skills/fitness/fitness-coach-lite
+
+# 从 ClawHub 安装（clawhub.gg）
+# 在 ClawHub 搜索 fitness-coach-lite，使用 listing 提供的安装命令
+
+# 安装后首次使用需要初始化训练计划
+python3 ~/.hermes/skills/fitness/fitness-coach-lite/scripts/workout.py plan import
+```
 
 ---
 
@@ -17,7 +32,7 @@ A Telegram-native personal workout tracker — low-friction input, status tracki
 ## 目录结构 | File Structure
 
 ```
-fitness-coach/
+fitness-coach-lite/
 ├── SKILL.md              # Skill definition for OpenClaw
 ├── README.md             # This file
 ├── scripts/
