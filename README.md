@@ -6,13 +6,17 @@ A Telegram-native personal workout tracker — low-friction input, status tracki
 
 ## 安装 | Installation
 
-```bash
-# 从 GitHub 安装
-git clone https://github.com/youhan2021/fitness-coach-lite.git ~/.hermes/skills/fitness/fitness-coach-lite
-
-# 从 ClawHub 安装（clawhub.gg）
-# 在 ClawHub 搜索 fitness-coach-lite，使用 listing 提供的安装命令
+**从 GitHub 安装：**
+```prompt
+安装 fitness-coach-lite skill：https://github.com/youhan2021/fitness-coach-lite
 ```
+
+**从 ClawHub 安装（clawhub.gg）：**
+```prompt
+从 ClawHub 安装 fitness-coach-lite
+```
+
+---
 
 **首次使用 — 初始化训练计划：**
 ```prompt
