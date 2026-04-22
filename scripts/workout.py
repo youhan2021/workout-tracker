@@ -16,7 +16,30 @@ workout-tracker 主脚本
 import json
 import os
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
+
+# 严格从环境变量 HERMES_SESSION_START 解析真实日期（UTC+8）
+# 格式示例: "2026-04-21T05:15:00+08:00"
+def _get_session_dt():
+    raw = os.environ.get("HERMES_SESSION_START", "")
+    if raw:
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    # Fallback：用 UTC+8（Asia/Shanghai）的当前时间
+    utc8 = timezone(timedelta(hours=8))
+    return datetime.now(utc8)
+
+def _get_session_dt_local():
+    """当前时刻的UTC+8 datetime（用于timestamp记录）"""
+    dt = _get_session_dt()
+    utc8 = timezone(timedelta(hours=8))
+    return dt.astimezone(utc8)
+
+def _get_session_date():
+    """从session时间戳获取真实日期（UTC+8），fallback到系统时间"""
+    return _get_session_dt_local().date()
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(SKILL_DIR, "data")
@@ -40,7 +63,7 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def get_today_name():
-    return date.today().strftime("%A").lower()
+    return _get_session_date().strftime("%A").lower()
 
 # ─── 计划管理 ───────────────────────────────────────────────
 
@@ -137,7 +160,7 @@ def get_today_workout(version_hint=None):
         seq = plan.get("sequence", [])
         if not seq:
             return None
-        day_of_year = date.today().timetuple().tm_yday
+        day_of_year = _get_session_date().timetuple().tm_yday
         idx = (day_of_year - 1) % len(seq)
         return seq[idx]
     else:
@@ -258,8 +281,8 @@ def _start_workout_common(workout):
         return "今天没有训练动作！"
     steps = _action_to_steps(workout)
     state = {
-        "started_at": datetime.now().isoformat(),
-        "date": str(date.today()),
+        "started_at": _get_session_dt_local().isoformat(),
+        "date": str(_get_session_date()),
         "workout": workout,
         "steps": steps,
         "current_step": 0,
@@ -361,7 +384,7 @@ def finish_workout():
     record = {
         "date": state["date"],
         "started_at": state["started_at"],
-        "finished_at": datetime.now().isoformat(),
+        "finished_at": _get_session_dt_local().isoformat(),
         "completed": state.get("completed", [])
     }
     history = [h for h in history if h.get("date") != state["date"]]
@@ -404,7 +427,7 @@ def reset_today():
     """重置今日训练（兼容新旧history格式）"""
     if os.path.exists(CURRENT_FILE):
         os.remove(CURRENT_FILE)
-    today = str(date.today())
+    today = str(_get_session_date())
     hist_data = load_json(HISTORY_FILE, {})
     if isinstance(hist_data, dict) and "records" in hist_data:
         hist_data["records"] = [r for r in hist_data["records"] if r.get("date") != today]
@@ -472,7 +495,7 @@ def show_history(days: int = 30):
         records = hist_data.get("records", [])
     else:
         records = hist_data  # 旧格式是数组
-    cutoff_date = (datetime.now() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
+    cutoff_date = (_get_session_dt_local() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
     # 过滤 workout 类型
     workouts = [r for r in records if r.get("date", "") >= cutoff_date and r.get("type") == "workout"]
     if not workouts:
@@ -502,7 +525,7 @@ def history_table(days: int = 30):
         records = hist_data.get("records", [])
     else:
         records = hist_data
-    cutoff_date = (datetime.now() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
+    cutoff_date = (_get_session_dt_local() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
     recent = [h for h in records if h.get("date", "") >= cutoff_date]
     if not recent:
         return None
@@ -511,7 +534,7 @@ def history_table(days: int = 30):
 def _history_add(date_str: str, record_type: str, workout_data=None, status=None, detail=None, reason=None):
     """向history.json追加记录（新版统一格式，自动迁移旧数据）"""
     raw = load_json(HISTORY_FILE, None)
-    now = datetime.now().isoformat()
+    now = _get_session_dt_local().isoformat()
 
     # 首次写入：如果是 None（旧文件不存在）或 list（旧格式），迁移为新格式
     if raw is None:
@@ -612,7 +635,7 @@ def _filter_records(hist_data, start_date: str, end_date: str, rec_type=None):
     return result
 
 def report_today(ref_date: str = None):
-    ref = ref_date or str(date.today())
+    ref = ref_date or str(_get_session_date())
     hist_data = load_json(HISTORY_FILE, {"records": []})
     workouts = _filter_records(hist_data, ref, ref, "workout")
     statuses = _filter_records(hist_data, ref, ref, "status")
@@ -649,7 +672,7 @@ def report_today(ref_date: str = None):
     return "\n".join(lines)
 
 def report_week(ref_date: str = None):
-    ref = ref_date or str(date.today())
+    ref = ref_date or str(_get_session_date())
     mon, sun = _get_week_range(ref)
     hist_data = load_json(HISTORY_FILE, {"records": []})
     workouts = _filter_records(hist_data, mon, sun, "workout")
@@ -686,7 +709,7 @@ def report_week(ref_date: str = None):
     return "\n".join(lines)
 
 def report_month(ref_date: str = None):
-    ref = ref_date or str(date.today())
+    ref = ref_date or str(_get_session_date())
     first, last = _get_month_range(ref)
     hist_data = load_json(HISTORY_FILE, {"records": []})
     workouts = _filter_records(hist_data, first, last, "workout")
@@ -708,7 +731,7 @@ def report_month(ref_date: str = None):
     return "\n".join(lines)
 
 def report_summary(ref_date: str = None):
-    ref = ref_date or str(date.today())
+    ref = ref_date or str(_get_session_date())
     hist_data = load_json(HISTORY_FILE, {"records": []})
     today_dt = datetime.strptime(ref, "%Y-%m-%d")
     # 最近4周
@@ -740,7 +763,7 @@ def body_update(height_cm=None, weight_kg=None, body_fat_pct=None,
                 experience=None, limitations=None):
     """更新身体状态字段（只更新提供的字段）"""
     data = load_json(BODY_FILE, {})
-    now = datetime.now().strftime("%Y-%m-%d")
+    now = _get_session_dt_local().strftime("%Y-%m-%d")
     if "created_at" not in data:
         data["created_at"] = now
     data["updated_at"] = now
@@ -768,7 +791,7 @@ def body_log(height_cm=None, weight_kg=None, body_fat_pct=None, notes=None):
     data = load_json(BODY_FILE, {})
     history = data.get("history", [])
     entry = {
-        "date": datetime.now().strftime("%Y-%m-%d"),
+        "date": _get_session_dt_local().strftime("%Y-%m-%d"),
         "height_cm": height_cm if height_cm is not None else data.get("height_cm"),
         "weight_kg": weight_kg if weight_kg is not None else data.get("weight_kg"),
         "body_fat_pct": body_fat_pct if body_fat_pct is not None else data.get("body_fat_pct"),
@@ -784,7 +807,7 @@ def body_history(days=90):
     """显示身体状态历史"""
     data = load_json(BODY_FILE, {})
     history = data.get("history", [])
-    cutoff = (datetime.now() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
+    cutoff = (_get_session_dt_local() - __import__('datetime').timedelta(days=days-1)).strftime("%Y-%m-%d")
     recent = [h for h in history if h.get("date", "") >= cutoff]
     if not recent:
         return None
@@ -947,7 +970,7 @@ if __name__ == "__main__":
         session_file = os.path.join(DATA_DIR, ".session.json")
         has_session = os.path.exists(session_file)
         session = load_json(session_file) if has_session else None
-        date_str = sys.argv[2] if len(sys.argv) > 2 else str(date.today())
+        date_str = sys.argv[2] if len(sys.argv) > 2 else str(_get_session_date())
         try:
             data = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
         except:
@@ -964,7 +987,7 @@ if __name__ == "__main__":
                 if planned_names and planned_names <= logged_names:
                     # 所有计划动作都已记录，自动算时长
                     started_at = session.get("started_at")
-                    finished_at = datetime.now().isoformat()
+                    finished_at = _get_session_dt_local().isoformat()
                     dur_mins = 0
                     try:
                         s = datetime.fromisoformat(started_at)
@@ -985,7 +1008,7 @@ if __name__ == "__main__":
 
     elif cmd == "status-log":
         # workout.py status-log "2026-04-20" tired "昨晚没睡好"
-        date_str = sys.argv[2] if len(sys.argv) > 2 else str(date.today())
+        date_str = sys.argv[2] if len(sys.argv) > 2 else str(_get_session_date())
         status = sys.argv[3] if len(sys.argv) > 3 else "normal"
         detail = sys.argv[4] if len(sys.argv) > 4 else ""
         _history_add(date_str, "status", status=status, detail=detail)
@@ -993,7 +1016,7 @@ if __name__ == "__main__":
 
     elif cmd == "report":
         sub = sys.argv[2] if len(sys.argv) > 2 else "today"
-        ref_date = sys.argv[3] if len(sys.argv) > 3 else str(date.today())
+        ref_date = sys.argv[3] if len(sys.argv) > 3 else str(_get_session_date())
         if sub == "today":
             print(report_today(ref_date))
         elif sub == "week":
@@ -1009,7 +1032,7 @@ if __name__ == "__main__":
         sub = sys.argv[2] if len(sys.argv) > 2 else ""
         if sub == "version":
             reason = sys.argv[3] if len(sys.argv) > 3 else ""
-            _history_add(str(date.today()), "plan_change", reason=reason)
+            _history_add(str(_get_session_date()), "plan_change", reason=reason)
             print(f"✅ 方案版本记录已保存：{reason}")
         elif sub == "view":
             print(plan_view())
@@ -1029,7 +1052,7 @@ if __name__ == "__main__":
         if plan:
             mode = plan.get("mode", "weekly")
             if mode == "sequence":
-                day_of_year = date.today().timetuple().tm_yday
+                day_of_year = _get_session_date().timetuple().tm_yday
                 seq = plan.get("sequence", [])
                 if seq:
                     today_plan = seq[(day_of_year - 1) % len(seq)]
@@ -1047,8 +1070,8 @@ if __name__ == "__main__":
                             today_plan = raw[key]
                             break
         session = {
-            "started_at": datetime.now().isoformat(),
-            "date": str(date.today()),
+            "started_at": _get_session_dt_local().isoformat(),
+            "date": str(_get_session_date()),
             "plan": today_plan
         }
         save_json(session_file, session)
@@ -1062,7 +1085,7 @@ if __name__ == "__main__":
             sys.exit(1)
         session = load_json(session_file)
         started_at = session.get("started_at")
-        finished_at = datetime.now().isoformat()
+        finished_at = _get_session_dt_local().isoformat()
         # 计算时长
         dur_mins = 0
         try:
@@ -1075,7 +1098,7 @@ if __name__ == "__main__":
         hist_data = load_json(HISTORY_FILE, {"records": []})
         records = hist_data.get("records", [])
         # 找到 date 相同的最新的 workout 记录
-        date_str = session.get("date", str(date.today()))
+        date_str = session.get("date", str(_get_session_date()))
         for i, rec in enumerate(records):
             if rec.get("date") == date_str and rec.get("type") == "workout":
                 if rec["workout"].get("duration_min") is None or rec["workout"].get("duration_min") == 0:

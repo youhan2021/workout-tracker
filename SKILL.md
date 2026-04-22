@@ -289,6 +289,57 @@ data/
 **Quick Actions：**
 - 6个快捷操作选项
 
+---
+
+## ⚠️ 技术注意事项
+
+### 日期必须从 HERMES_SESSION_START 环境变量读取
+
+`workout.py` 脚本中的日期/时间计算**禁止**使用 Python 内置的 `date.today()` 或 `datetime.now()`，因为系统时钟可能与实际用户时区不一致。
+
+**正确做法：** 脚本从 `HERMES_SESSION_START` 环境变量解析 session 开始的 UTC 时间戳，再转换为 UTC+8（用户所在时区）。
+
+```python
+from datetime import datetime, timezone, timedelta
+
+def _get_session_dt():
+    raw = os.environ.get("HERMES_SESSION_START", "")
+    if raw:
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    return datetime.now(timezone.utc)  # fallback
+
+def _get_session_dt_local():
+    dt = _get_session_dt()
+    utc8 = timezone(timedelta(hours=8))
+    return dt.astimezone(utc8)
+
+def _get_session_date():
+    return _get_session_dt_local().date()
+```
+
+然后将所有 `date.today()` 替换为 `_get_session_date()`，所有 `datetime.now()` 替换为 `_get_session_dt_local()`。
+
+### .gitignore 清单
+
+```
+__pycache__/
+*.py[cod]
+backend/.pybase/
+backend/.vendor/
+backend/.venv/
+.pytest_cache/
+.env
+.data/
+*.log
+*.lock
+dist/
+```
+
+---
+
 ❌ 以下为第一版**不做**项（留待后续迭代）：
 - 饮食记录
 - 热量计算
