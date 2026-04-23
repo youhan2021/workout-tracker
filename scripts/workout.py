@@ -313,7 +313,8 @@ def complete_set(actual_reps: int):
     steps = state.get("steps", [])
     current = state.get("current_step", 0)
     if current >= len(steps):
-        return "所有步骤已完成"
+        result = finish_workout_from_state()
+        return result if result else "训练完成"
     step = steps[current]
     record = {
         "name": step["name"],
@@ -327,7 +328,8 @@ def complete_set(actual_reps: int):
     state["current_step"] = current + 1
     save_json(CURRENT_FILE, state)
     if state["current_step"] >= len(steps):
-        return finish_workout()
+        result = finish_workout_from_state()
+        return result if result else "训练完成"
     next_step = steps[state["current_step"]]
     w = f"{next_step['weight_kg']}kg" if next_step.get("weight_kg") else "自重"
     r = next_step.get("reps", "?")
@@ -342,7 +344,8 @@ def skip_action():
     steps = state.get("steps", [])
     current = state.get("current_step", 0)
     if current >= len(steps):
-        return "所有步骤已完成"
+        result = finish_workout_from_state()
+        return result if result else "训练完成"
     step = steps[current]
     record = {
         "name": step["name"],
@@ -356,7 +359,10 @@ def skip_action():
     state["current_step"] = current + 1
     save_json(CURRENT_FILE, state)
     if state["current_step"] >= len(steps):
-        return finish_workout()
+        result = finish_workout_from_state()
+        if result:
+            return result
+        return "训练完成（但未能保存到历史，请检查）"
     next_step = steps[state["current_step"]]
     w = f"{next_step['weight_kg']}kg" if next_step.get("weight_kg") else "自重"
     r = next_step.get("reps", "?")
@@ -364,25 +370,88 @@ def skip_action():
     return f"⏭️ 已跳过 **{step['name']}**\n下一个：**{next_step['name']}** {w} × {r}{dropset}"
 
 def finish_workout():
-    """完成训练，保存到历史"""
+    """从 .session.json 读取完成训练（供 start-session 流程使用）"""
+    session_file = os.path.join(DATA_DIR, ".session.json")
+    if not os.path.exists(session_file):
+        return None  # 没有 session 文件，尝试从 current_workout 读取
+    session = load_json(session_file)
+    started_at = session.get("started_at")
+    finished_at = _get_session_dt_local().isoformat()
+    dur_mins = 0
+    try:
+        s = datetime.fromisoformat(started_at)
+        e = datetime.fromisoformat(finished_at)
+        dur_mins = int((e - s).total_seconds() / 60)
+    except:
+        pass
+    hist_data = load_json(HISTORY_FILE, {"records": []})
+    records = hist_data.get("records", [])
+    date_str = session.get("date", str(_get_session_date()))
+    for i, rec in enumerate(records):
+        if rec.get("date") == date_str and rec.get("type") == "workout":
+            if rec["workout"].get("duration_min") is None or rec["workout"].get("duration_min") == 0:
+                rec["workout"]["duration_min"] = dur_mins
+                records[i] = rec
+                break
+    hist_data["records"] = records
+    save_json(HISTORY_FILE, hist_data)
+    os.remove(session_file)
+    return f"✅ 训练完成，用时约 {dur_mins} 分钟"
+
+def finish_workout_from_state():
+    """从 .current_workout.json 读取并完成训练"""
     state = load_json(CURRENT_FILE)
     if not state:
-        return "没有正在进行的训练"
-    history = load_json(HISTORY_FILE, [])
-    record = {
-        "date": state["date"],
-        "started_at": state["started_at"],
-        "finished_at": _get_session_dt_local().isoformat(),
-        "completed": state.get("completed", [])
+        return None
+
+    # 构建新版 workout_data（exercises 格式）
+    exercises_map = {}
+    for c in state.get("completed", []):
+        name = c.get("name", "?")
+        if name not in exercises_map:
+            exercises_map[name] = {"name": name, "weight_kg": c.get("weight_kg"), "sets": []}
+        exercises_map[name]["sets"].append({
+            "reps": c.get("reps"),
+            "actual_reps": c.get("actual_reps")
+        })
+    workout_data = {
+        "exercises": list(exercises_map.values()),
+        "summary": "",
+        "note": ""
     }
-    history = [h for h in history if h.get("date") != state["date"]]
-    history.insert(0, record)
-    save_json(HISTORY_FILE, history)
+
+    # 使用 _history_add 以新版统一格式写入（自动处理去重）
+    _history_add(state["date"], "workout", workout_data=workout_data)
+
+    # 计算时长
+    started_at = state.get("started_at", "")
+    finished_at = _get_session_dt_local().isoformat()
+    dur_mins = 0
+    try:
+        s = datetime.fromisoformat(started_at)
+        e = datetime.fromisoformat(finished_at)
+        dur_mins = int((e - s).total_seconds() / 60)
+    except:
+        pass
+
+    # 更新 duration_min
+    hist_data = load_json(HISTORY_FILE, {"records": []})
+    records = hist_data.get("records", [])
+    for i, rec in enumerate(records):
+        if rec.get("date") == state["date"] and rec.get("type") == "workout":
+            if rec["workout"].get("duration_min") is None or rec["workout"].get("duration_min") == 0:
+                rec["workout"]["duration_min"] = dur_mins
+                records[i] = rec
+                break
+    hist_data["records"] = records
+    save_json(HISTORY_FILE, hist_data)
+
     os.remove(CURRENT_FILE)
+
+    # 生成完成摘要
     lines = ["🏁 **训练完成！**\n"]
-    # 按动作分组显示
     by_action = {}
-    for c in record["completed"]:
+    for c in state.get("completed", []):
         name = c["name"]
         if name not in by_action:
             by_action[name] = {"name": name, "sets": []}
@@ -399,7 +468,7 @@ def finish_workout():
             lines.append(f"  ✅ {name} {w}kg: {len(done)}组 ({total_reps}次)")
         else:
             lines.append(f"  ⚠️ {name} {w}kg: {len(done)}/{len(sets)}组 ({total_reps}次)")
-    lines.append(f"\n⏱️ 用时: {get_duration(state.get('started_at',''), record['finished_at'])}")
+    lines.append(f"\n⏱️ 用时: {dur_mins}分钟")
     return "\n".join(lines)
 
 def get_duration(start: str, end: str):
